@@ -1,0 +1,101 @@
+///
+/// Universidad del Valle de Guatemala
+/// BE3029 - Electrónica Digital 2
+/// PWM RGB Parte A
+///
+
+#include <Arduino.h>
+#include <driver/ledc.h>
+
+/// Pines LED
+#define LED_AZUL   14
+#define LED_VERDE  25
+#define LED_ROJO   27
+
+/// Botones
+#define BTN_SELEC      15
+#define BTN_INTENSIDAD 4
+
+/// PWM: canales por color
+#define PWM_AZUL   0
+#define PWM_VERDE  1
+#define PWM_ROJO   2
+
+/// PWM configuración
+#define FREQ_PWM  100
+#define RES_PWM   12    // Resolución de 0–4095
+
+/// Variables de control
+uint8_t ledSeleccionado = 0;          // 0: Azul, 1: Verde, 2: Rojo
+uint8_t niveles[3] = {0, 0, 0};       // Nivel de cada LED
+
+/// Cada LED tiene su propia escala de brillo
+const uint16_t pwmAzul[4]  = {0, 1024, 2048, 3072}; // Azul se ve más poquito
+const uint16_t pwmVerde[4] = {0, 1365, 2730, 4095}; // Verde normal
+const uint16_t pwmRojo[4]  = {0, 500, 2000, 4000};  // Rojo más vivo el color
+
+/// Estados para antirrebote
+bool estadoPrevioBtnSelec = false;
+bool estadoPrevioBtnIntensidad = false;
+
+/// Inicializa canal PWM
+void setupPWM(uint8_t canal, uint8_t pin) {
+  ledcSetup(canal, FREQ_PWM, RES_PWM);
+  ledcAttachPin(pin, canal);
+  ledcWrite(canal, 0);
+}
+
+/// Setup principal
+void setup() {
+  Serial.begin(115200);
+  pinMode(BTN_SELEC, INPUT_PULLUP);
+  pinMode(BTN_INTENSIDAD, INPUT_PULLUP);
+
+  setupPWM(PWM_AZUL, LED_AZUL);
+  setupPWM(PWM_VERDE, LED_VERDE);
+  setupPWM(PWM_ROJO, LED_ROJO);
+}
+
+/// Loop principal
+void loop() {
+  // Lectura de botones con lógica inversa
+  bool btnSelec = !digitalRead(BTN_SELEC);
+  bool btnIntensidad = !digitalRead(BTN_INTENSIDAD);
+
+  // Cambio de LED seleccionado
+  if (btnSelec && !estadoPrevioBtnSelec) {
+    ledSeleccionado = (ledSeleccionado + 1) % 3;
+    Serial.print("LED Seleccionado: ");
+    Serial.println(ledSeleccionado == 0 ? "AZUL" : (ledSeleccionado == 1 ? "VERDE" : "ROJO"));
+  }
+  estadoPrevioBtnSelec = btnSelec;
+
+  // Cambio de intensidad
+  if (btnIntensidad && !estadoPrevioBtnIntensidad) {
+    niveles[ledSeleccionado] = (niveles[ledSeleccionado] + 1) % 4;
+    uint16_t nuevoValor = 0;
+
+    switch (ledSeleccionado) {
+      case 0:
+        nuevoValor = pwmAzul[niveles[0]];
+        ledcWrite(PWM_AZUL, nuevoValor);
+        break;
+      case 1:
+        nuevoValor = pwmVerde[niveles[1]];
+        ledcWrite(PWM_VERDE, nuevoValor);
+        break;
+      case 2:
+        nuevoValor = pwmRojo[niveles[2]];
+        ledcWrite(PWM_ROJO, nuevoValor);
+        break;
+    }
+
+    Serial.print("Intensidad LED ");
+    Serial.print(ledSeleccionado);
+    Serial.print(" -> ");
+    Serial.println(nuevoValor);
+  }
+  estadoPrevioBtnIntensidad = btnIntensidad;
+
+  delay(100); // Antirrebote
+}
