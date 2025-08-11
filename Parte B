@@ -1,0 +1,91 @@
+///
+/// Universidad del Valle de Guatemala
+/// BE3029 - Electrónica Digital 2
+/// Parte B - Servo con 2 botones y 5 posiciones: 0°, 45°, 90°, 135°, 180°
+///
+
+#include <Arduino.h>
+#include <driver/ledc.h>
+
+// -------------------- Pines --------------------
+#define PIN_SERVO       18  // Pin del servo
+#define BOTON_DERECHA   15  // Mover a la derecha (+45°)
+#define BOTON_IZQUIERDA  4  // Mover a la izquierda (-45°)
+
+// -------------------- Configuración PWM --------------------
+#define CANAL_PWM_SERVO  0   // Canal PWM para el servo
+#define FRECUENCIA_PWM  50   // 50 Hz -> periodo 20 ms
+#define RESOLUCION_PWM  16   // 0..65535
+
+// Límites de pulso del servo en microsegundos
+#define PULSO_MIN_US   600   // 0°
+#define PULSO_MAX_US  2400   // 180°
+
+static const uint16_t ANGULOS[5] = {0, 45, 90, 135, 180}; // Posiciones fijas
+uint8_t posicionActual = 2; // Empieza en 90°
+
+// Estados previos de los botones (antirrebote simple)
+bool estadoPrevioDerecha = false;
+bool estadoPrevioIzquierda = false;
+
+// -------------------- Prototipos --------------------
+static inline uint16_t anguloAMicroseg(uint16_t angulo);
+static inline uint32_t microsegADuty(uint16_t microseg);
+static void moverServo(uint16_t angulo);
+static void iniciarPWM(void);
+
+// -------------------- Setup --------------------
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(BOTON_DERECHA, INPUT_PULLUP);
+  pinMode(BOTON_IZQUIERDA, INPUT_PULLUP);
+
+  iniciarPWM();
+  moverServo(ANGULOS[posicionActual]);
+}
+
+// -------------------- Loop --------------------
+void loop() {
+  bool presionadoDerecha = !digitalRead(BOTON_DERECHA);
+  bool presionadoIzquierda = !digitalRead(BOTON_IZQUIERDA);
+
+  // Mover a la derecha (+45°)
+  if (presionadoDerecha && !estadoPrevioDerecha) {
+    if (posicionActual < 4) posicionActual++;
+    moverServo(ANGULOS[posicionActual]);
+    Serial.printf("Derecha -> Posición: %u°\n", ANGULOS[posicionActual]);
+  }
+  estadoPrevioDerecha = presionadoDerecha;
+
+  // Mover a la izquierda (-45°)
+  if (presionadoIzquierda && !estadoPrevioIzquierda) {
+    if (posicionActual > 0) posicionActual--;
+    moverServo(ANGULOS[posicionActual]);
+    Serial.printf("Izquierda -> Posición: %u°\n", ANGULOS[posicionActual]);
+  }
+  estadoPrevioIzquierda = presionadoIzquierda;
+
+  delay(40); // Antirrebote
+}
+
+// -------------------- Funciones --------------------
+static void iniciarPWM(void) {
+  ledcSetup(CANAL_PWM_SERVO, FRECUENCIA_PWM, RESOLUCION_PWM);
+  ledcAttachPin(PIN_SERVO, CANAL_PWM_SERVO);
+}
+
+static inline uint16_t anguloAMicroseg(uint16_t angulo) {
+  return PULSO_MIN_US + ((uint32_t)(PULSO_MAX_US - PULSO_MIN_US) * angulo) / 180U;
+}
+
+static inline uint32_t microsegADuty(uint16_t microseg) {
+  const uint32_t dutyMax = (1UL << RESOLUCION_PWM) - 1UL;
+  return ((uint64_t)microseg * FRECUENCIA_PWM * dutyMax) / 1000000ULL;
+}
+
+static void moverServo(uint16_t angulo) {
+  uint16_t microseg = anguloAMicroseg(angulo);
+  uint32_t duty = microsegADuty(microseg);
+  ledcWrite(CANAL_PWM_SERVO, duty);
+}
