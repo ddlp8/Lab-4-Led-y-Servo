@@ -1,0 +1,33 @@
+///
+/// Universidad del Valle de Guatemala
+/// BE3029 - Electrónica Digital 2
+/// Parte C - Integración RGB (Part A) + Servo (Part B) + Modo indicador
+///
+
+#include <Arduino.h>
+#include <driver/ledc.h>
+
+/// ------------------- Pines LED (Parte A) -------------------
+#define LED_AZUL   14
+#define LED_VERDE  25
+#define LED_ROJO   27
+
+/// ------------------- Botones RGB (Parte A) -----------------
+#define BTN_SELEC      15   // B1: Seleccionar LED
+#define BTN_INTENSIDAD  4   // B2: Cambiar intensidad LED seleccionado
+
+/// ------------------- PWM canales LED (Parte A) -------------
+#define PWM_AZUL   0
+#define PWM_VERDE  1
+#define PWM_ROJO   2
+
+/// ------------------- PWM configuración LED -----------------
+#define FREQ_PWM  100
+#define RES_PWM   12    // 0..4095
+
+/// ------------------- Variables RGB (Parte A) ---------------
+uint8_t ledSeleccionado = 0;          // 0: Azul, 1: Verde, 2: Rojo
+uint8_t niveles[3] = {0, 0, 0};       // Nivel de cada LED
+const uint16_t pwmAzul[4]  = {0, 1024, 2048, 3072}; // Azul tenue
+const uint16_t pwmVerde[4] = {0, 1365, 2730, 4095}; // Verde normal
+const uint16_t pwmRojo[4]  = {0,  500, 2000, 4000}; // Rojo vivo
