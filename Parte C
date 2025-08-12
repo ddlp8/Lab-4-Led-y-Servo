@@ -1,7 +1,7 @@
 ///
 /// Universidad del Valle de Guatemala
 /// BE3029 - Electrónica Digital 2
-/// Parte C - Integración RGB (Part A) + Servo (Part B) + Modo indicador
+/// Parte C - RGB (Part A) + Servo (Part B) + Modo indicador
 ///
 
 #include <Arduino.h>
