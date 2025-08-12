@@ -7,27 +7,218 @@
 #include <Arduino.h>
 #include <driver/ledc.h>
 
-/// ------------------- Pines LED (Parte A) -------------------
+// ------------------- Parte A: LEDs RGB -------------------
+// Asigné pines para cada color del LED RGB
 #define LED_AZUL   14
 #define LED_VERDE  25
 #define LED_ROJO   27
 
-/// ------------------- Botones RGB (Parte A) -----------------
-#define BTN_SELEC      15   // B1: Seleccionar LED
-#define BTN_INTENSIDAD  4   // B2: Cambiar intensidad LED seleccionado
+// Botones para controlar el LED RGB
+#define BTN_SELEC      15 // Cambia el color seleccionado
+#define BTN_INTENSIDAD  4 // Cambia el brillo del color seleccionado
 
-/// ------------------- PWM canales LED (Parte A) -------------
+// Canales PWM para cada color
 #define PWM_AZUL   0
 #define PWM_VERDE  1
 #define PWM_ROJO   2
 
-/// ------------------- PWM configuración LED -----------------
+// Configuración del PWM para LEDs
 #define FREQ_PWM  100
-#define RES_PWM   12    // 0..4095
+#define RES_PWM   12  // Resolución de 0 a 4095
 
-/// ------------------- Variables RGB (Parte A) ---------------
-uint8_t ledSeleccionado = 0;          // 0: Azul, 1: Verde, 2: Rojo
-uint8_t niveles[3] = {0, 0, 0};       // Nivel de cada LED
-const uint16_t pwmAzul[4]  = {0, 1024, 2048, 3072}; // Azul tenue
-const uint16_t pwmVerde[4] = {0, 1365, 2730, 4095}; // Verde normal
-const uint16_t pwmRojo[4]  = {0,  500, 2000, 4000}; // Rojo vivo
+// Variables para saber qué LED está activo y su brillo
+uint8_t ledSeleccionado = 0;          // 0=Azul, 1=Verde, 2=Rojo
+uint8_t niveles[3] = {0, 0, 0};       // Nivel de brillo de cada color
+
+// Valores PWM para cada nivel de brillo de cada color
+const uint16_t pwmAzul[4]  = {0, 1024, 2048, 3072};
+const uint16_t pwmVerde[4] = {0, 1365, 2730, 4095};
+const uint16_t pwmRojo[4]  = {0,  500, 2000, 4000};
+
+// Variables para antirrebote
+bool estadoPrevioBtnSelec = false;
+bool estadoPrevioBtnIntensidad = false;
+
+// ------------------- Parte B: Servo -------------------
+#define PIN_SERVO        18   // Pin donde conecté el servo
+
+// Botones para mover el servo
+#define BOTON_DERECHA    21   // Mueve +45°
+#define BOTON_IZQUIERDA  23   // Mueve -45°
+
+#define CANAL_PWM_SERVO  3    // Canal PWM distinto al de los LEDs
+#define FRECUENCIA_PWM   50   // Frecuencia de servo
+#define RESOLUCION_PWM   16   // Resolución de servo
+
+// Pulsos mínimos y máximos para el servo
+#define PULSO_MIN_US    600
+#define PULSO_MAX_US   2400
+
+// Ángulos fijos del servo
+static const uint16_t ANGULOS[5] = {0, 45, 90, 135, 180};
+uint8_t posicionActual = 2; // Empieza en 90°
+
+bool estadoPrevioDerecha = false;
+bool estadoPrevioIzquierda = false;
+
+// ------------------- Modo Indicador -------------------
+// false = controlo LEDs manualmente
+// true  = LEDs muestran posición del servo
+bool modoServoLED = false;
+bool estadoPrevioModo = false;
+
+// ------------------- Prototipos -------------------
+void setupPWM(uint8_t canal, uint8_t pin);
+static void iniciarPWM(void);
+static inline uint16_t anguloAMicroseg(uint16_t a);
+static inline uint32_t microsegADuty(uint16_t us);
+static void moverServo(uint16_t angulo);
+static void aplicarBrillosManual(void);
+static void aplicarIndicadorPorServo(void);
+
+// ------------------- Setup -------------------
+void setup() {
+  Serial.begin(115200);
+
+  // Configuro todos los botones con pull-up
+  pinMode(BTN_SELEC, INPUT_PULLUP);
+  pinMode(BTN_INTENSIDAD, INPUT_PULLUP);
+  pinMode(BOTON_DERECHA, INPUT_PULLUP);
+  pinMode(BOTON_IZQUIERDA, INPUT_PULLUP);
+
+  // Inicializo PWM para LEDs
+  setupPWM(PWM_AZUL,  LED_AZUL);
+  setupPWM(PWM_VERDE, LED_VERDE);
+  setupPWM(PWM_ROJO,  LED_ROJO);
+
+  // Inicializo PWM para Servo
+  iniciarPWM();
+  moverServo(ANGULOS[posicionActual]); // Lo pongo en la posición inicial
+
+  // Apago todos los LEDs al inicio
+  ledcWrite(PWM_AZUL, 0);
+  ledcWrite(PWM_VERDE,0);
+  ledcWrite(PWM_ROJO, 0);
+}
+
+// ------------------- Loop -------------------
+void loop() {
+  // Leo todos los botones (activo en LOW)
+  bool btnSelec        = !digitalRead(BTN_SELEC);
+  bool btnIntensidad   = !digitalRead(BTN_INTENSIDAD);
+  bool presionadoDer   = !digitalRead(BOTON_DERECHA);
+  bool presionadoIzq   = !digitalRead(BOTON_IZQUIERDA);
+
+  // --- Cambio de modo (presionando B1 y B2 juntos) ---
+  bool combo = (btnSelec && btnIntensidad);
+  if (combo && !estadoPrevioModo) {
+    modoServoLED = !modoServoLED; // Alterna entre manual y indicador
+    Serial.printf("Modo %s\n", modoServoLED ? "INDICADOR (servo→LED)" : "MANUAL RGB");
+  }
+  estadoPrevioModo = combo;
+
+  // --- Control RGB (solo en modo manual) ---
+  if (!modoServoLED) {
+    // Cambiar LED seleccionado (B1)
+    if (btnSelec && !estadoPrevioBtnSelec && !combo) {
+      ledSeleccionado = (ledSeleccionado + 1) % 3;
+      Serial.print("LED Seleccionado: ");
+      Serial.println(ledSeleccionado == 0 ? "AZUL" : (ledSeleccionado == 1 ? "VERDE" : "ROJO"));
+    }
+    estadoPrevioBtnSelec = btnSelec;
+
+    // Cambiar intensidad del LED seleccionado (B2)
+    if (btnIntensidad && !estadoPrevioBtnIntensidad && !combo) {
+      niveles[ledSeleccionado] = (niveles[ledSeleccionado] + 1) % 4;
+      aplicarBrillosManual();
+    }
+    estadoPrevioBtnIntensidad = btnIntensidad;
+  } else {
+    // En modo indicador, ajusto LEDs según posición del servo
+    aplicarIndicadorPorServo();
+    estadoPrevioBtnSelec = btnSelec;
+    estadoPrevioBtnIntensidad = btnIntensidad;
+  }
+
+  // --- Control del Servo ---
+  // Mover a la derecha (+45°)
+  if (presionadoDer && !estadoPrevioDerecha) {
+    if (posicionActual < 4) posicionActual++;
+    moverServo(ANGULOS[posicionActual]);
+    Serial.printf("Derecha -> %u°\n", ANGULOS[posicionActual]);
+    if (modoServoLED) aplicarIndicadorPorServo();
+  }
+  estadoPrevioDerecha = presionadoDer;
+
+  // Mover a la izquierda (-45°)
+  if (presionadoIzq && !estadoPrevioIzquierda) {
+    if (posicionActual > 0) posicionActual--;
+    moverServo(ANGULOS[posicionActual]);
+    Serial.printf("Izquierda -> %u°\n", ANGULOS[posicionActual]);
+    if (modoServoLED) aplicarIndicadorPorServo();
+  }
+  estadoPrevioIzquierda = presionadoIzq;
+
+  delay(40); // Antirrebote
+}
+
+// ------------------- Funciones -------------------
+// Inicializa un canal PWM para un LED
+void setupPWM(uint8_t canal, uint8_t pin) {
+  ledcSetup(canal, FREQ_PWM, RES_PWM);
+  ledcAttachPin(pin, canal);
+  ledcWrite(canal, 0);
+}
+
+// Configura PWM para el servo
+static void iniciarPWM(void) {
+  ledcSetup(CANAL_PWM_SERVO, FRECUENCIA_PWM, RESOLUCION_PWM);
+  ledcAttachPin(PIN_SERVO, CANAL_PWM_SERVO);
+}
+
+// Convierte ángulo a microsegundos para servo
+static inline uint16_t anguloAMicroseg(uint16_t angulo) {
+  return PULSO_MIN_US + ((uint32_t)(PULSO_MAX_US - PULSO_MIN_US) * angulo) / 180U;
+}
+
+// Convierte microsegundos a duty cycle
+static inline uint32_t microsegADuty(uint16_t microseg) {
+  const uint32_t dutyMax = (1UL << RESOLUCION_PWM) - 1UL;
+  return ((uint64_t)microseg * FRECUENCIA_PWM * dutyMax) / 1000000ULL;
+}
+
+// Mueve el servo al ángulo indicado
+static void moverServo(uint16_t angulo) {
+  uint16_t microseg = anguloAMicroseg(angulo);
+  uint32_t duty     = microsegADuty(microseg);
+  ledcWrite(CANAL_PWM_SERVO, duty);
+}
+
+// Aplica brillo manual según niveles[] definidos
+static void aplicarBrillosManual(void) {
+  ledcWrite(PWM_AZUL,  pwmAzul[niveles[0]]);
+  ledcWrite(PWM_VERDE, pwmVerde[niveles[1]]);
+  ledcWrite(PWM_ROJO,  pwmRojo[niveles[2]]);
+}
+
+// Ajusta LEDs en función de la posición del servo
+static void aplicarIndicadorPorServo(void) {
+  // Apago todos los LEDs primero
+  ledcWrite(PWM_AZUL,  0);
+  ledcWrite(PWM_VERDE, 0);
+  ledcWrite(PWM_ROJO,  0);
+
+  // Enciendo según ángulo
+  switch (ANGULOS[posicionActual]) {
+    case 45:
+      ledcWrite(PWM_AZUL,  pwmAzul[3]);  // Azul
+      break;
+    case 90:
+      ledcWrite(PWM_ROJO,  pwmRojo[3]);  // Rojo
+      break;
+    case 135:
+      ledcWrite(PWM_VERDE, pwmVerde[3]); // Verde
+      break;
+    // 0° y 180° dejan todo apagado
+  }
+}
